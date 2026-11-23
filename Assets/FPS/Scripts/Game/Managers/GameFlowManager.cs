@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace Unity.FPS.Game
@@ -32,9 +32,14 @@ namespace Unity.FPS.Game
 
         float m_TimeLoadEndGameScene;
         string m_SceneToLoad;
+        RunScoreManager m_RunScore;
+        bool m_EndRequested;
+        bool m_RequestedWin;
 
         void Awake()
         {
+            m_RunScore = GetComponent<RunScoreManager>();
+            Time.timeScale = 1f;
             EventManager.AddListener<AllObjectivesCompletedEvent>(OnAllObjectivesCompleted);
             EventManager.AddListener<PlayerDeathEvent>(OnPlayerDeath);
         }
@@ -62,11 +67,27 @@ namespace Unity.FPS.Game
             }
         }
 
-        void OnAllObjectivesCompleted(AllObjectivesCompletedEvent evt) => EndGame(true);
-        void OnPlayerDeath(PlayerDeathEvent evt) => EndGame(false);
+        void OnAllObjectivesCompleted(AllObjectivesCompletedEvent evt) => RequestEnd(true);
+        void OnPlayerDeath(PlayerDeathEvent evt) => RequestEnd(false);
+
+        void RequestEnd(bool win)
+        {
+            if (GameIsEnding) return;
+            m_RequestedWin = m_EndRequested ? m_RequestedWin && win : win;
+            m_EndRequested = true;
+        }
+
+        void LateUpdate()
+        {
+            if (!m_EndRequested || GameIsEnding) return;
+            m_EndRequested = false;
+            EndGame(m_RequestedWin);
+        }
 
         void EndGame(bool win)
         {
+            if (GameIsEnding) return;
+            if (m_RunScore != null) m_RunScore.CompleteRun(win);
             // unlocks the cursor before leaving the scene, to be able to click buttons
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;

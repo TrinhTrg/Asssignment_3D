@@ -1,4 +1,4 @@
-﻿using Unity.FPS.Game;
+using Unity.FPS.Game;
 using UnityEngine;
 
 namespace Unity.FPS.Gameplay
@@ -17,10 +17,8 @@ namespace Unity.FPS.Gameplay
             if (playerWeaponsManager)
             {
                 WeaponController weapon = playerWeaponsManager.HasWeapon(Weapon);
-                if (weapon != null)
+                if (weapon != null && weapon.UsesManualReload && weapon.TryAddReserveAmmo(BulletCount) > 0)
                 {
-                    weapon.AddCarriablePhysicalBullets(BulletCount);
-
                     AmmoPickupEvent evt = Events.AmmoPickupEvent;
                     evt.Weapon = weapon;
                     EventManager.Broadcast(evt);

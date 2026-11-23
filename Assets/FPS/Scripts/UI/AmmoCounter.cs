@@ -1,4 +1,4 @@
-﻿using TMPro;
+using TMPro;
 using Unity.FPS.Game;
 using Unity.FPS.Gameplay;
 using UnityEngine;
@@ -28,8 +28,10 @@ namespace Unity.FPS.UI
 
         [Tooltip("Reload Text for Weapons with physical bullets")]
         public RectTransform Reload;
+        [Tooltip("Optional status label for the V2 manual weapon")]
+        public TMPro.TextMeshProUGUI ManualReloadText;
 
-        [Header("Selection")] [Range(0, 1)] [Tooltip("Opacity when weapon not selected")]
+        [Header("Selection")][Range(0, 1)] [Tooltip("Opacity when weapon not selected")]
         public float UnselectedOpacity = 0.5f;
 
         [Tooltip("Scale when weapon not selected")]
@@ -55,9 +57,9 @@ namespace Unity.FPS.UI
 
         void OnAmmoPickup(AmmoPickupEvent evt)
         {
-            if (evt.Weapon == m_Weapon)
+            if (evt.Weapon == m_Weapon && m_Weapon != null)
             {
-                BulletCounter.text = m_Weapon.GetCarriedPhysicalBullets().ToString();
+                UpdateAmmoText();
             }
         }
 
@@ -66,10 +68,8 @@ namespace Unity.FPS.UI
             m_Weapon = weapon;
             WeaponCounterIndex = weaponIndex;
             WeaponImage.sprite = weapon.WeaponIcon;
-            if (!weapon.HasPhysicalBullets)
-                BulletCounter.transform.parent.gameObject.SetActive(false);
-            else
-                BulletCounter.text = weapon.GetCarriedPhysicalBullets().ToString();
+            BulletCounter.transform.parent.gameObject.SetActive(weapon.UsesManualReload || weapon.HasPhysicalBullets);
+            UpdateAmmoText();
 
             Reload.gameObject.SetActive(false);
             m_PlayerWeaponsManager = FindObjectOfType<PlayerWeaponsManager>();
@@ -82,11 +82,12 @@ namespace Unity.FPS.UI
 
         void Update()
         {
+            if (m_Weapon == null || m_PlayerWeaponsManager == null) return;
             float currenFillRatio = m_Weapon.CurrentAmmoRatio;
             AmmoFillImage.fillAmount = Mathf.Lerp(AmmoFillImage.fillAmount, currenFillRatio,
                 Time.deltaTime * AmmoFillMovementSharpness);
 
-            BulletCounter.text = m_Weapon.GetCarriedPhysicalBullets().ToString();
+            UpdateAmmoText();
 
             bool isActiveWeapon = m_Weapon == m_PlayerWeaponsManager.GetActiveWeapon();
 
@@ -98,10 +99,31 @@ namespace Unity.FPS.UI
 
             FillBarColorChange.UpdateVisual(currenFillRatio);
 
-            Reload.gameObject.SetActive(m_Weapon.GetCarriedPhysicalBullets() > 0 && m_Weapon.GetCurrentAmmo() == 0 && m_Weapon.IsWeaponActive);
+            if (m_Weapon.UsesManualReload)
+            {
+                Reload.gameObject.SetActive(isActiveWeapon);
+                var label = ManualReloadText;
+                if (label != null)
+                    label.text = m_Weapon.IsReloading ? "RELOADING..."
+                        : m_Weapon.GetReserveAmmo() == 0 ? "NO RESERVE"
+                        : m_Weapon.GetCurrentAmmo() < m_Weapon.MaxAmmo ? "[R] RELOAD" : "[R] Reload";
+            }
+            else
+            {
+                Reload.gameObject.SetActive(m_Weapon.GetCarriedPhysicalBullets() > 0 && m_Weapon.GetCurrentAmmo() == 0 && m_Weapon.IsWeaponActive);
+            }
         }
 
-        void Destroy()
+        void UpdateAmmoText()
+        {
+            if (m_Weapon == null || BulletCounter == null) return;
+            if (m_Weapon.UsesManualReload)
+                BulletCounter.SetText("AMMO {0} / {1}", m_Weapon.GetCurrentAmmo(), m_Weapon.GetReserveAmmo());
+            else
+                BulletCounter.SetText("{0}", m_Weapon.GetCarriedPhysicalBullets());
+        }
+
+        void OnDestroy()
         {
             EventManager.RemoveListener<AmmoPickupEvent>(OnAmmoPickup);
         }

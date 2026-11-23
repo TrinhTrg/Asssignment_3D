@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
@@ -94,6 +94,15 @@ namespace Unity.FPS.Game
         [Tooltip("Maximum amount of ammo in the gun")]
         public int MaxAmmo = 8;
 
+        [Header("Manual Reload")]
+        [Tooltip("Reserve rounds when this manual-reload weapon is spawned")]
+        public int InitialReserveAmmo = 48;
+        public int MaxReserveAmmo = 96;
+        public float ManualReloadDuration = 1.5f;
+        float m_ReloadTimeRemaining;
+        public bool UsesManualReload => !AutomaticReload;
+        public int GetReserveAmmo() => m_CarriedPhysicalBullets;
+
         [Header("Charging parameters (charging weapons only)")]
         [Tooltip("Trigger a shot when maximum charge is reached")]
         public bool AutomaticReleaseOnCharged;
@@ -165,8 +174,14 @@ namespace Unity.FPS.Game
 
         void Awake()
         {
+            MaxAmmo = Mathf.Max(1, MaxAmmo);
+            MaxReserveAmmo = Mathf.Max(0, MaxReserveAmmo);
+            ManualReloadDuration = Mathf.Max(0.1f, ManualReloadDuration);
             m_CurrentAmmo = MaxAmmo;
-            m_CarriedPhysicalBullets = HasPhysicalBullets ? ClipSize : 0;
+            m_CarriedPhysicalBullets = UsesManualReload
+                ? Mathf.Clamp(InitialReserveAmmo, 0, MaxReserveAmmo)
+                : (HasPhysicalBullets ? ClipSize : 0);
+            CurrentAmmoRatio = 1f;
             m_LastMuzzlePosition = WeaponMuzzle.position;
 
             m_ShootAudioSource = GetComponent<AudioSource>();
@@ -196,7 +211,16 @@ namespace Unity.FPS.Game
             }
         }
 
-        public void AddCarriablePhysicalBullets(int count) => m_CarriedPhysicalBullets = Mathf.Max(m_CarriedPhysicalBullets + count, MaxAmmo);
+        public void AddCarriablePhysicalBullets(int count) => TryAddReserveAmmo(count);
+
+        public int TryAddReserveAmmo(int count)
+        {
+            if (count <= 0) return 0;
+            int before = m_CarriedPhysicalBullets;
+            int capacity = UsesManualReload ? MaxReserveAmmo : Mathf.Max(MaxAmmo, ClipSize);
+            m_CarriedPhysicalBullets += Mathf.Min(count, Mathf.Max(0, capacity - before));
+            return m_CarriedPhysicalBullets - before;
+        }
 
         void ShootShell()
         {
@@ -217,25 +241,40 @@ namespace Unity.FPS.Game
 
         void Reload()
         {
-            if (m_CarriedPhysicalBullets > 0)
-            {
-                m_CurrentAmmo = Mathf.Min(m_CarriedPhysicalBullets, ClipSize);
-            }
-
-            IsReloading = false;
+            if (!IsReloading || !UsesManualReload) return;
+            int transfer = Mathf.Min(MaxAmmo - GetCurrentAmmo(), m_CarriedPhysicalBullets);
+            m_CurrentAmmo += transfer;
+            m_CarriedPhysicalBullets -= transfer;
+            CurrentAmmoRatio = m_CurrentAmmo / MaxAmmo;
+            CancelReload();
         }
 
         public void StartReloadAnimation()
         {
-            if (m_CurrentAmmo < m_CarriedPhysicalBullets)
-            {
-                GetComponent<Animator>().SetTrigger("Reload");
-                IsReloading = true;
-            }
+            if (!UsesManualReload || IsReloading || !IsWeaponActive || IsCharging
+                || GetCurrentAmmo() >= MaxAmmo || m_CarriedPhysicalBullets <= 0) return;
+            IsReloading = true;
+            m_ReloadTimeRemaining = ManualReloadDuration;
+        }
+
+        public void CancelReload()
+        {
+            IsReloading = false;
+            m_ReloadTimeRemaining = 0f;
+        }
+
+        void OnDisable()
+        {
+            CancelReload();
         }
 
         void Update()
         {
+            if (IsReloading)
+            {
+                m_ReloadTimeRemaining -= Time.deltaTime;
+                if (m_ReloadTimeRemaining <= 0f) Reload();
+            }
             UpdateAmmo();
             UpdateCharge();
             UpdateContinuousShootSound();
@@ -332,6 +371,7 @@ namespace Unity.FPS.Game
 
         public void ShowWeapon(bool show)
         {
+            if (!show) CancelReload();
             WeaponRoot.SetActive(show);
 
             if (show && ChangeWeaponSfx)
@@ -345,13 +385,18 @@ namespace Unity.FPS.Game
         public void UseAmmo(float amount)
         {
             m_CurrentAmmo = Mathf.Clamp(m_CurrentAmmo - amount, 0f, MaxAmmo);
-            m_CarriedPhysicalBullets -= Mathf.RoundToInt(amount);
-            m_CarriedPhysicalBullets = Mathf.Clamp(m_CarriedPhysicalBullets, 0, MaxAmmo);
+            if (!UsesManualReload)
+            {
+                m_CarriedPhysicalBullets -= Mathf.RoundToInt(amount);
+                m_CarriedPhysicalBullets = Mathf.Clamp(m_CarriedPhysicalBullets, 0, MaxAmmo);
+            }
+            CurrentAmmoRatio = m_CurrentAmmo / MaxAmmo;
             m_LastTimeShot = Time.time;
         }
 
         public bool HandleShootInputs(bool inputDown, bool inputHeld, bool inputUp)
         {
+            if (IsReloading || Time.timeScale == 0f) return false;
             m_WantsToShoot = inputDown || inputHeld;
             switch (ShootType)
             {
